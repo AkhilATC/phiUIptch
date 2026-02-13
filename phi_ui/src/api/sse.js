@@ -1,18 +1,23 @@
-export async function startChatSSE(message, onMessage) {
+let currentMessage = ""; // streaming buffer
+let sessionData = null;
+
+export async function startChatSSE(message, onMessage, onSession) {
   const token = localStorage.getItem("token");
+  const sessionId = localStorage.getItem("x_session_id");
 
   const url = `http://0.0.0.0:5990/agent/urs-agent/chat?message=${encodeURIComponent(message)}`;
 
   const response = await fetch(url, {
     headers: {
       Authorization: `Bearer ${token}`,
-      "Accept": "text/event-stream",
+      Accept: "text/event-stream",
+      "x-session-id": sessionId || "",
     },
+
   });
 
   const reader = response.body.getReader();
   const decoder = new TextDecoder("utf-8");
-
   let buffer = "";
 
   while (true) {
@@ -21,18 +26,37 @@ export async function startChatSSE(message, onMessage) {
 
     buffer += decoder.decode(value, { stream: true });
 
-    // Parse SSE chunks
-    const events = buffer.split("\n\n");
-    buffer = events.pop(); // keep incomplete chunk
+    const lines = buffer.split("\n");
+    buffer = lines.pop();
 
-    for (const event of events) {
-      if (event.startsWith("data:")) {
-        const data = event.replace("data:", "").trim();
-        try {
-          const json = JSON.parse(data);
-          onMessage(json.text || JSON.stringify(json));
-        } catch {
-          onMessage(data);
+    let eventType = null;
+
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        eventType = line.replace("event:", "").trim();
+      }
+
+      if (line.startsWith("data:")) {
+        const dataStr = line.replace("data:", "").trim();
+        const data = JSON.parse(dataStr);
+
+        // ✅ SESSION EVENT
+        if (eventType === "session") {
+          sessionData = data;
+          localStorage.setItem("x_session_id", data.session_id);
+          onSession?.(data);
+        }
+
+        // ✅ MESSAGE EVENT (STREAMING)
+        if (eventType === "message") {
+          currentMessage += data.text; // append token
+          onMessage(currentMessage);   // update same bubble
+        }
+
+        // ✅ DONE EVENT
+        if (eventType === "done") {
+          console.log("Stream completed");
+          currentMessage = ""; // reset for next question
         }
       }
     }

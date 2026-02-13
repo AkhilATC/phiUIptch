@@ -4,6 +4,7 @@ import { startChatSSE } from "../api/sse";
 export default function ChatWindow({ onClose }) {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState("");
+  const [isStreaming, setIsStreaming] = useState(false);
   const chatRef = useRef(null);
 
   function sendMessage() {
@@ -11,9 +12,20 @@ export default function ChatWindow({ onClose }) {
 
     const userMsg = { role: "user", text: input };
     setMessages(prev => [...prev, userMsg]);
+    setIsStreaming(true);
 
-    startChatSSE(input, (data) => {
-      setMessages(prev => [...prev, { role: "agent", text: data }]);
+    startChatSSE(input, (text) => {
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+
+        if (last && last.role === "agent") {
+          return [...prev.slice(0, -1), { ...last, text }];
+        }
+
+        return [...prev, { role: "agent", text }];
+      });
+    }, () => {
+      setIsStreaming(false);
     });
 
     setInput("");
@@ -45,6 +57,11 @@ export default function ChatWindow({ onClose }) {
             }}
           >
             {m.text}
+
+            {/* Typing Cursor */}
+            {isStreaming && i === messages.length - 1 && m.role === "agent" && (
+              <span className="cursor">▌</span>
+            )}
           </div>
         ))}
       </div>
@@ -60,6 +77,19 @@ export default function ChatWindow({ onClose }) {
         />
         <button style={styles.sendBtn} onClick={sendMessage}>➤</button>
       </div>
+
+      {/* Cursor CSS */}
+      <style>{`
+        .cursor {
+          margin-left: 2px;
+          animation: blink 1s step-start infinite;
+          font-weight: bold;
+        }
+
+        @keyframes blink {
+          50% { opacity: 0; }
+        }
+      `}</style>
     </div>
   );
 }
@@ -109,6 +139,7 @@ const styles = {
     borderRadius: 16,
     fontSize: 14,
     lineHeight: 1.4,
+    transition: "all 0.1s ease-out",
   },
   inputBox: {
     display: "flex",
